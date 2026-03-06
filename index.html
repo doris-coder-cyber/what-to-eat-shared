@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>今天吃什么 - 多人共享</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.38.0/dist/umd/supabase.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            padding: 20px;
+        }
+        .container { max-width: 480px; margin: 0 auto; }
+        .header { text-align: center; padding: 40px 0 30px; }
+        .header h1 {
+            font-size: 36px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff 0%, #a8edea 50%, #fed6e3 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .header p { color: rgba(255,255,255,0.6); font-size: 14px; }
+        .card {
+            background: rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 24px;
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 16px;
+        }
+        .slot-machine {
+            background: rgba(0,0,0,0.3);
+            border-radius: 20px;
+            padding: 40px 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .slot-icon { font-size: 80px; margin-bottom: 12px; }
+        .slot-name { font-size: 32px; font-weight: 700; color: white; }
+        .empty-text { color: rgba(255,255,255,0.5); font-size: 16px; }
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 16px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary.spinning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .btn-small { padding: 12px 20px; font-size: 14px; width: auto; }
+        .btn-delete {
+            background: rgba(244, 67, 54, 0.2);
+            color: #ff8a80;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .food-count { font-size: 13px; color: rgba(255,255,255,0.5); font-weight: normal; }
+        .food-list { max-height: 240px; overflow-y: auto; margin-bottom: 16px; }
+        .food-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+        .food-item-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 15px;
+            color: white;
+        }
+        .food-icon { font-size: 24px; }
+        .add-form { display: flex; gap: 10px; }
+        .input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 12px;
+            font-size: 15px;
+            background: rgba(0,0,0,0.2);
+            color: white;
+            outline: none;
+        }
+        .input::placeholder { color: rgba(255,255,255,0.4); }
+        .loading { text-align: center; color: white; padding: 40px; }
+        .error { text-align: center; color: #ff8a80; padding: 40px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>今天吃什么</h1>
+            <p>多人共享菜品库</p>
+        </div>
+        
+        <div class="card">
+            <div class="slot-machine" id="slot-display">
+                <div class="empty-text">点击下方按钮，让命运决定今天吃什么</div>
+            </div>
+            <button class="btn btn-primary" id="spin-btn" onclick="toggleSpin()">🎲 开始随机</button>
+        </div>
+        
+        <div class="card">
+            <div class="section-title">
+                <span>📝 共享菜品库</span>
+                <span class="food-count" id="food-count">加载中...</span>
+            </div>
+            
+            <div class="food-list" id="food-list">
+                <div class="loading">加载中...</div>
+            </div>
+            
+            <div class="add-form">
+                <input type="text" class="input" id="new-food-name" placeholder="输入菜品名称" maxlength="20">
+                <button class="btn btn-primary btn-small" onclick="addFood()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Supabase 配置
+        const SUPABASE_URL = 'https://ayzhfqpbufnfjarxzlia.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_bhT6VETc92RWWBgcN1iU_Q_eo6KBbNi';
+        
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        let foods = [];
+        let isSpinning = false;
+        let spinInterval = null;
+        
+        const defaultFoods = [
+            { name: '麻辣烫', icon: '🍲' },
+            { name: '火锅', icon: '🥘' },
+            { name: '烧烤', icon: '🍢' },
+            { name: '寿司', icon: '🍣' },
+            { name: '披萨', icon: '🍕' },
+            { name: '汉堡', icon: '🍔' },
+            { name: '面条', icon: '🍜' },
+            { name: '炒饭', icon: '🍛' },
+            { name: '沙拉', icon: '🥗' },
+            { name: '饺子', icon: '🥟' },
+            { name: '炸鸡', icon: '🍗' },
+            { name: '奶茶', icon: '🧋' }
+        ];
+        
+        function getIcon(name) {
+            const keywords = [
+                { keys: ['面', '粉', '拉面', '牛肉面', '海鲜面', '米线', '螺蛳粉'], icon: '🍜' },
+                { keys: ['饺子', '水饺', '蒸饺', '煎饺', '馄饨', '抄手'], icon: '🥟' },
+                { keys: ['饭', '炒饭', '盖饭', '拌饭', '煲仔饭'], icon: '🍛' },
+                { keys: ['火锅', '串串', '麻辣烫', '冒菜'], icon: '🥘' },
+                { keys: ['烧烤', '烤肉', '烤串'], icon: '🍢' },
+                { keys: ['寿司', '日料'], icon: '🍣' },
+                { keys: ['披萨', 'pizza'], icon: '🍕' },
+                { keys: ['汉堡', '三明治'], icon: '🍔' },
+                { keys: ['沙拉', '轻食'], icon: '🥗' },
+                { keys: ['鸡', '炸鸡', '烤鸡', '鸡翅'], icon: '🍗' },
+                { keys: ['鱼', '烤鱼', '水煮鱼'], icon: '🐟' },
+                { keys: ['虾', '龙虾', '小龙虾'], icon: '🦐' },
+                { keys: ['牛', '牛肉', '牛排', '肥牛'], icon: '🥩' },
+                { keys: ['粥', '稀饭'], icon: '🥣' },
+                { keys: ['包', '包子', '汤包'], icon: '🥟' },
+                { keys: ['汤', '煲汤'], icon: '🍲' },
+                { keys: ['奶', '奶茶', '牛奶'], icon: '🧋' },
+                { keys: ['咖啡'], icon: '☕' },
+                { keys: ['蛋糕', '甜点', '甜品'], icon: '🍰' },
+                { keys: ['冰淇淋', '雪糕'], icon: '🍦' },
+                { keys: ['肯德基', '麦当劳', 'KFC'], icon: '🍟' }
+            ];
+            
+            for (const item of keywords) {
+                for (const key of item.keys) {
+                    if (name.includes(key)) return item.icon;
+                }
+            }
+            return ['🍜', '🍲', '🥘', '🍛', '🍝', '🍣', '🍕', '🍔', '🥗', '🥟', '🍗', '🥩'][Math.floor(Math.random() * 12)];
+        }
+        
+        async function loadFoods() {
+            try {
+                const { data, error } = await supabase
+                    .from('foods')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                
+                if (error) throw error;
+                
+                if (data && data.length > 0) {
+                    foods = data;
+                } else {
+                    // 初始化默认数据
+                    await initDefaultFoods();
+                }
+                renderFoodList();
+            } catch (err) {
+                console.error('加载失败:', err);
+                document.getElementById('food-list').innerHTML = '<div class="error">加载失败，请刷新重试</div>';
+            }
+        }
+        
+        async function initDefaultFoods() {
+            for (const food of defaultFoods) {
+                await supabase.from('foods').insert(food);
+            }
+            await loadFoods();
+        }
+        
+        function renderFoodList() {
+            const list = document.getElementById('food-list');
+            const count = document.getElementById('food-count');
+            
+            count.textContent = `共 ${foods.length} 道`;
+            
+            if (foods.length === 0) {
+                list.innerHTML = '';
+                return;
+            }
+            
+            list.innerHTML = foods.map(food => `
+                <div class="food-item">
+                    <div class="food-item-info">
+                        <span class="food-icon">${food.icon}</span>
+                        <span>${food.name}</span>
+                    </div>
+                    <button class="btn-delete" onclick="deleteFood(${food.id})">删除</button>
+                </div>
+            `).join('');
+        }
+        
+        async function addFood() {
+            const input = document.getElementById('new-food-name');
+            const name = input.value.trim();
+            if (!name) return;
+            
+            const newFood = {
+                name: name,
+                icon: getIcon(name)
+            };
+            
+            const { data, error } = await supabase
+                .from('foods')
+                .insert(newFood)
+                .select()
+                .single();
+            
+            if (error) {
+                console.error('添加失败:', error);
+            } else if (data) {
+                foods.unshift(data);
+                renderFoodList();
+                input.value = '';
+            }
+        }
+        
+        async function deleteFood(id) {
+            const { error } = await supabase
+                .from('foods')
+                .delete()
+                .eq('id', id);
+            
+            if (error) {
+                console.error('删除失败:', error);
+            } else {
+                foods = foods.filter(f => f.id !== id);
+                renderFoodList();
+            }
+        }
+        
+        function toggleSpin() {
+            const btn = document.getElementById('spin-btn');
+            const display = document.getElementById('slot-display');
+            
+            if (isSpinning) {
+                clearInterval(spinInterval);
+                isSpinning = false;
+                btn.textContent = '🎲 开始随机';
+                btn.classList.remove('spinning');
+                
+                const food = foods[Math.floor(Math.random() * foods.length)];
+                display.innerHTML = `
+                    <div class="slot-icon">${food.icon}</div>
+                    <div class="slot-name">${food.name}</div>
+                `;
+            } else {
+                if (foods.length === 0) {
+                    alert('请先添加菜品');
+                    return;
+                }
+                
+                isSpinning = true;
+                btn.textContent = '⏹️ 停止';
+                btn.classList.add('spinning');
+                
+                spinInterval = setInterval(() => {
+                    const food = foods[Math.floor(Math.random() * foods.length)];
+                    display.innerHTML = `
+                        <div class="slot-icon">${food.icon}</div>
+                        <div class="slot-name">${food.name}</div>
+                    `;
+                }, 80);
+            }
+        }
+        
+        // 回车添加
+        document.getElementById('new-food-name').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') addFood();
+        });
+        
+        // 加载数据
+        loadFoods();
+        
+        // 实时订阅更新
+        supabase
+            .channel('foods')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'foods' }, () => {
+                loadFoods();
+            })
+            .subscribe();
+    </script>
+</body>
+</html>
