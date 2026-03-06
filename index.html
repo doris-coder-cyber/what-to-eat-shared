@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>今天吃什么 - 多人共享</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.38.0/dist/umd/supabase.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -73,6 +72,16 @@
             font-size: 13px;
             cursor: pointer;
         }
+        .btn-refresh {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
         .section-title {
             font-size: 16px;
             font-weight: 600;
@@ -81,6 +90,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
         }
         .food-count { font-size: 13px; color: rgba(255,255,255,0.5); font-weight: normal; }
         .food-list { max-height: 240px; overflow-y: auto; margin-bottom: 16px; }
@@ -113,8 +123,19 @@
             outline: none;
         }
         .input::placeholder { color: rgba(255,255,255,0.4); }
-        .loading { text-align: center; color: white; padding: 40px; }
-        .error { text-align: center; color: #ff8a80; padding: 40px; }
+        .loading { text-align: center; color: white; padding: 20px; }
+        .error { 
+            text-align: center; 
+            color: #ff8a80; 
+            padding: 20px; 
+            font-size: 14px;
+        }
+        .sync-status {
+            font-size: 12px;
+            color: rgba(255,255,255,0.4);
+            margin-top: 5px;
+            width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -133,8 +154,12 @@
         
         <div class="card">
             <div class="section-title">
-                <span>📝 共享菜品库</span>
-                <span class="food-count" id="food-count">加载中...</span>
+                <div>
+                    <span>📝 共享菜品库</span>
+                    <span class="food-count" id="food-count">加载中...</span>
+                    <button class="btn-refresh" onclick="manualRefresh()">🔄 刷新</button>
+                </div>
+                <div class="sync-status" id="sync-status">正在连接...</div>
             </div>
             
             <div class="food-list" id="food-list">
@@ -149,11 +174,9 @@
     </div>
 
     <script>
-        // Supabase 配置
+        // 纯 fetch 实现，不依赖任何外部库
         const SUPABASE_URL = 'https://ayzhfqpbufnfjarxzlia.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5emhmcXBiaHVmbmphcnh6bGlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3ODUxMzksImV4cCI6MjA4ODM2MTEzOX0.Tkn88manJqwkIbVukMPUx2RfndMmRLhMKO6PgFbwowY';
-        
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         
         let foods = [];
         let isSpinning = false;
@@ -173,6 +196,47 @@
             { name: '炸鸡', icon: '🍗' },
             { name: '奶茶', icon: '🧋' }
         ];
+        
+        // 使用 fetch 直接调用 Supabase REST API
+        async function apiGet(path) {
+            const url = `${SUPABASE_URL}/rest/v1/${path}`;
+            const res = await fetch(url, {
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`
+                }
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        }
+        
+        async function apiPost(path, body) {
+            const url = `${SUPABASE_URL}/rest/v1/${path}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        }
+        
+        async function apiDelete(path) {
+            const url = `${SUPABASE_URL}/rest/v1/${path}`;
+            const res = await fetch(url, {
+                method: 'DELETE',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`
+                }
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }
         
         function getIcon(name) {
             const keywords = [
@@ -208,32 +272,36 @@
         }
         
         async function loadFoods() {
+            const statusEl = document.getElementById('sync-status');
+            statusEl.textContent = '正在同步...';
+            
             try {
-                const { data, error } = await supabase
-                    .from('foods')
-                    .select('*')
-                    .order('created_at', { ascending: false });
-                
-                if (error) throw error;
+                const data = await apiGet('foods?select=*&order=created_at.desc');
                 
                 if (data && data.length > 0) {
                     foods = data;
+                    statusEl.textContent = `同步成功 ${new Date().toLocaleTimeString()}`;
                 } else {
-                    // 初始化默认数据
+                    statusEl.textContent = '初始化数据...';
                     await initDefaultFoods();
                 }
                 renderFoodList();
             } catch (err) {
                 console.error('加载失败:', err);
-                document.getElementById('food-list').innerHTML = '<div class="error">加载失败，请刷新重试</div>';
+                statusEl.textContent = '加载失败';
+                document.getElementById('food-list').innerHTML = `<div class="error">加载失败<br><small>${err.message}</small><br><button class="btn btn-primary btn-small" onclick="manualRefresh()">重新加载</button></div>`;
             }
         }
         
         async function initDefaultFoods() {
-            for (const food of defaultFoods) {
-                await supabase.from('foods').insert(food);
+            try {
+                for (const food of defaultFoods) {
+                    await apiPost('foods', food);
+                }
+                await loadFoods();
+            } catch (err) {
+                console.error('初始化失败:', err);
             }
-            await loadFoods();
         }
         
         function renderFoodList() {
@@ -243,7 +311,7 @@
             count.textContent = `共 ${foods.length} 道`;
             
             if (foods.length === 0) {
-                list.innerHTML = '';
+                list.innerHTML = '<div class="loading">暂无菜品</div>';
                 return;
             }
             
@@ -263,38 +331,46 @@
             const name = input.value.trim();
             if (!name) return;
             
-            const newFood = {
-                name: name,
-                icon: getIcon(name)
-            };
+            const statusEl = document.getElementById('sync-status');
+            statusEl.textContent = '正在添加...';
             
-            const { data, error } = await supabase
-                .from('foods')
-                .insert(newFood)
-                .select()
-                .single();
-            
-            if (error) {
-                console.error('添加失败:', error);
-            } else if (data) {
-                foods.unshift(data);
-                renderFoodList();
-                input.value = '';
+            try {
+                const newFood = { name: name, icon: getIcon(name) };
+                const data = await apiPost('foods', newFood);
+                
+                if (data && data[0]) {
+                    foods.unshift(data[0]);
+                    renderFoodList();
+                    input.value = '';
+                    statusEl.textContent = `添加成功 ${new Date().toLocaleTimeString()}`;
+                }
+            } catch (err) {
+                console.error('添加失败:', err);
+                statusEl.textContent = '添加失败';
+                alert('添加失败: ' + err.message);
             }
         }
         
         async function deleteFood(id) {
-            const { error } = await supabase
-                .from('foods')
-                .delete()
-                .eq('id', id);
+            if (!confirm('确定要删除这道菜吗？')) return;
             
-            if (error) {
-                console.error('删除失败:', error);
-            } else {
+            const statusEl = document.getElementById('sync-status');
+            statusEl.textContent = '正在删除...';
+            
+            try {
+                await apiDelete(`foods?id=eq.${id}`);
                 foods = foods.filter(f => f.id !== id);
                 renderFoodList();
+                statusEl.textContent = `删除成功 ${new Date().toLocaleTimeString()}`;
+            } catch (err) {
+                console.error('删除失败:', err);
+                statusEl.textContent = '删除失败';
             }
+        }
+        
+        function manualRefresh() {
+            document.getElementById('sync-status').textContent = '正在刷新...';
+            loadFoods();
         }
         
         function toggleSpin() {
@@ -308,10 +384,7 @@
                 btn.classList.remove('spinning');
                 
                 const food = foods[Math.floor(Math.random() * foods.length)];
-                display.innerHTML = `
-                    <div class="slot-icon">${food.icon}</div>
-                    <div class="slot-name">${food.name}</div>
-                `;
+                display.innerHTML = `<div class="slot-icon">${food.icon}</div><div class="slot-name">${food.name}</div>`;
             } else {
                 if (foods.length === 0) {
                     alert('请先添加菜品');
@@ -324,10 +397,7 @@
                 
                 spinInterval = setInterval(() => {
                     const food = foods[Math.floor(Math.random() * foods.length)];
-                    display.innerHTML = `
-                        <div class="slot-icon">${food.icon}</div>
-                        <div class="slot-name">${food.name}</div>
-                    `;
+                    display.innerHTML = `<div class="slot-icon">${food.icon}</div><div class="slot-name">${food.name}</div>`;
                 }, 80);
             }
         }
@@ -337,16 +407,8 @@
             if (e.key === 'Enter') addFood();
         });
         
-        // 加载数据
-        loadFoods();
-        
-        // 实时订阅更新
-        supabase
-            .channel('foods')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'foods' }, () => {
-                loadFoods();
-            })
-            .subscribe();
+        // 页面加载后开始
+        window.addEventListener('load', loadFoods);
     </script>
 </body>
 </html>
